@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>参加ページ</title></head>
+<body>
+<h1 id="title">予定合わせ</h1>
+<div id="meta"></div>
+<div id="slotArea"></div>
+
+<h3>あなたの情報</h3>
+<label>お名前: <input id="pname" /></label><br>
+<label>コメント（任意）: <input id="pmsg" style="width:400px" /></label><br>
+<button id="send">送信（仮登録）</button>
+
+<div id="done" style="display:none"></div>
+
+<script src="assets/common.js"></script>
+<script>
+function qs(name) {
+  const u = new URL(location.href);
+  return u.searchParams.get(name);
+}
+const id = qs('id');
+if (!id) {
+  document.body.innerHTML = '<p>イベントIDが指定されていません。</p>';
+}
+async function loadEvent() {
+  const path = `data/events/${id}.json`;
+  const f = await getFile(path);
+  if (!f) {
+    document.body.innerHTML = '<p>イベントが見つかりません。</p>'; return;
+  }
+  const ev = JSON.parse(f.content);
+  document.getElementById('title').textContent = ev.title;
+  document.getElementById('meta').textContent = `${ev.range.start} 〜 ${ev.range.end} ／ 最大参加者 ${ev.maxParticipants}`;
+  renderSlots(ev);
+  window._currentEvent = ev;
+  window._currentSha = f.sha;
+}
+function renderSlots(ev) {
+  const container = document.getElementById('slotArea');
+  container.innerHTML = '<p>候補をクリックして参加できます（複数選択可）</p>';
+  // 単純化：一日を 9:00 - 18:00 を 30分刻みで表示（実運用はカスタマイズしてください）
+  const start = new Date(ev.range.start);
+  const end = new Date(ev.range.end);
+  // 作りやすさ優先で、日毎に 9:00-18:00 を表示
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+    const day = d.toISOString().slice(0,10);
+    const dayDiv = document.createElement('div');
+    dayDiv.innerHTML = `<h4>${day}</h4>`;
+    const slots = document.createElement('div');
+    for (let h=9; h<18; h++) {
+      for (let m=0; m<60; m+=30) {
+        const timeLabel = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        // チェックNG時間帯
+        const blocked = ev.ngTimes && ev.ngTimes.some(t => t.date===day && timeLabel>=t.start && timeLabel<t.end);
+        const btn = document.createElement('button');
+        btn.disabled = blocked;
+        btn.style.margin='4px';
+        btn.textContent = `${timeLabel}`;
+        btn.dataset.slot = `${day} ${timeLabel}`;
+        btn.addEventListener('click', () => {
+          btn.classList.toggle('selected');
+        });
+        if (blocked) btn.title='NG時間';
+        slots.appendChild(btn);
+      }
+    }
+    dayDiv.appendChild(slots);
+    container.appendChild(dayDiv);
+  }
+}
+
+document.getElementById('send').addEventListener('click', async () => {
+  try {
+    const name = document.getElementById('pname').value.trim();
+    if (!name) { alert('名前を入力してください'); return; }
+    const msg = document.getElementById('pmsg').value.trim();
+    const selected = Array.from(document.querySelectorAll('button.selected')).map(b => b.dataset.slot);
+    if (selected.length===0) { if(!confirm('選択なしで送信しますか？')) return; }
+    // load existing event content (we need sha)
+    const path = `data/events/${id}.json`;
+    const f = await getFile(path);
+    if (!f) { alert('イベントが見つかりません'); return; }
+    const ev = JSON.parse(f.content);
+    ev.members = ev.members || [];
+    ev.members.push({ name, message: msg, slots: selected, createdAt: new Date().toISOString() });
+    await putFile(path, JSON.stringify(ev, null, 2), `Add participant to ${id}`);
+    document.getElementById('done').style.display='block';
+    document.getElementById('done').innerHTML = '<p>送信しました。管理者の承認をお待ちください。</p>';
+  } catch (e) {
+    alert('送信エラー: ' + e.message);
+    console.error(e);
+  }
+});
+
+// event ページからも getFile を使うため、GET だけでも PAT が必要になる実装にしてます。
+// （public リポジトリならこの getFile は公開 API で読めます。）
+loadEvent();
+</script>
+</body>
+</html>
