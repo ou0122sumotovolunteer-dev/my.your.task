@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>予定合わせ - イベント作成</title>
+</head>
+<body>
+<h1>イベント作成（管理者用）</h1>
+
+<p>注意：このページで使う GitHub Personal Access Token（PAT）は「リポジトリを書き換える権限」が必要です。トークンはブラウザの localStorage にのみ保存されます。</p>
+
+<label>GitHub PAT（入力後 Save を押してください）: </label>
+<input id="pat" type="password" style="width:400px">
+<button id="savePat">Save</button>
+<button id="clearPat">Clear</button>
+<p id="patStatus"></p>
+<hr>
+
+<label>タイトル: <input id="title" /></label><br>
+<label>説明: <input id="desc" style="width:400px" /></label><br>
+<label>開始日: <input id="startDate" type="date" /></label>
+<label>終了日: <input id="endDate" type="date" /></label><br>
+
+<h3>NG 時間帯（任意）</h3>
+<div id="ngList"></div>
+<button id="addNg">NG時間を追加</button>
+
+<label>想定参加人数（任意）: <input id="maxParticipants" type="number" min="1" value="4"></label><br>
+
+<button id="createEvent">イベントを作成してリンクを生成</button>
+
+<hr>
+<div id="result"></div>
+
+<script src="assets/common.js"></script>
+<script>
+function enablePatUI() {
+  const p = localStorage.getItem('gh_pat');
+  document.getElementById('pat').value = p || '';
+  document.getElementById('patStatus').textContent = p ? 'PAT 設定済み' : 'PAT 未設定';
+}
+enablePatUI();
+document.getElementById('savePat').addEventListener('click', () => {
+  const v = document.getElementById('pat').value.trim();
+  if (!v) { alert('トークンを入力してください'); return; }
+  localStorage.setItem('gh_pat', v);
+  enablePatUI();
+});
+document.getElementById('clearPat').addEventListener('click', () => { localStorage.removeItem('gh_pat'); enablePatUI(); });
+
+function addNgRow(date='', start='09:00', end='12:00') {
+  const div = document.createElement('div');
+  div.innerHTML = `
+    日付: <input type="date" class="ng-date" value="${date}">
+    開始: <input type="time" class="ng-start" value="${start}">
+    終了: <input type="time" class="ng-end" value="${end}">
+    <button class="removeNg">削除</button>
+  `;
+  div.querySelector('.removeNg').addEventListener('click', () => div.remove());
+  document.getElementById('ngList').appendChild(div);
+}
+document.getElementById('addNg').addEventListener('click', () => addNgRow());
+
+document.getElementById('createEvent').addEventListener('click', async () => {
+  try {
+    const title = document.getElementById('title').value || '無題';
+    const desc = document.getElementById('desc').value || '';
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    if (!startDate || !endDate) { alert('開始日・終了日を指定してください'); return; }
+    const maxParticipants = parseInt(document.getElementById('maxParticipants').value || '4', 10);
+    const ngElems = document.querySelectorAll('#ngList > div');
+    const ngTimes = [];
+    ngElems.forEach(e => {
+      const d = e.querySelector('.ng-date').value;
+      const s = e.querySelector('.ng-start').value;
+      const t = e.querySelector('.ng-end').value;
+      if (d && s && t) ngTimes.push({ date: d, start: s, end: t });
+    });
+
+    // event id（簡易UUID）
+    const id = 'ev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,8);
+
+    const eventObj = {
+      id,
+      title,
+      desc,
+      range: { start: startDate, end: endDate },
+      ngTimes,
+      maxParticipants,
+      members: [],
+      finalDecision: null,
+      createdAt: new Date().toISOString()
+    };
+
+    // 保存先 path
+    const path = `data/events/${id}.json`;
+    await putFile(path, JSON.stringify(eventObj, null, 2), `Create event ${id}`);
+
+    const url = `${location.origin}/event.html?id=${id}`;
+    const adminUrl = `${location.origin}/admin.html?id=${id}`;
+
+    document.getElementById('result').innerHTML = `
+      <p>イベントを作成しました！</p>
+      <p>参加用URL: <a href="${url}" target="_blank">${url}</a></p>
+      <p>管理用URL: <a href="${adminUrl}" target="_blank">${adminUrl}</a></p>
+      <pre>${JSON.stringify(eventObj, null, 2)}</pre>
+    `;
+  } catch (e) {
+    alert('作成エラー: ' + e.message);
+    console.error(e);
+  }
+});
+</script>
+</body>
+</html>
