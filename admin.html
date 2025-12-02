@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><title>管理ページ</title></head>
+<body>
+<h1>管理ページ（承認）</h1>
+
+<label>GitHub PAT（入力後 Save）: </label>
+<input id="pat" type="password" style="width:400px">
+<button id="savePat">Save</button>
+<button id="clearPat">Clear</button>
+<p id="patStatus"></p>
+
+<label>イベントID: <input id="eventId" /></label>
+<button id="load">読み込む</button>
+<div id="content"></div>
+
+<script src="assets/common.js"></script>
+<script>
+function enablePatUI() {
+  const p = localStorage.getItem('gh_pat');
+  document.getElementById('pat').value = p || '';
+  document.getElementById('patStatus').textContent = p ? 'PAT 設定済み' : 'PAT 未設定';
+}
+enablePatUI();
+document.getElementById('savePat').addEventListener('click', () => {
+  const v = document.getElementById('pat').value.trim();
+  if (!v) { alert('トークンを入力してください'); return; }
+  localStorage.setItem('gh_pat', v);
+  enablePatUI();
+});
+document.getElementById('clearPat').addEventListener('click', () => { localStorage.removeItem('gh_pat'); enablePatUI(); });
+
+document.getElementById('load').addEventListener('click', async () => {
+  try {
+    const id = document.getElementById('eventId').value.trim();
+    if (!id) { alert('イベントIDを入れてください'); return; }
+    const path = `data/events/${id}.json`;
+    const f = await getFile(path);
+    if (!f) { alert('イベントが見つかりません'); return; }
+    const ev = JSON.parse(f.content);
+    window._currentEv = ev;
+    window._currentPath = path;
+    window._currentSha = f.sha;
+    renderAdmin(ev);
+  } catch (e) {
+    alert('読み込みエラー: ' + e.message);
+    console.error(e);
+  }
+});
+
+function renderAdmin(ev) {
+  const c = document.getElementById('content');
+  c.innerHTML = `<h2>${ev.title}</h2><p>${ev.range.start}〜${ev.range.end}</p>`;
+  if (!ev.members || ev.members.length===0) c.innerHTML += '<p>参加申請無し</p>';
+
+  // メンバー一覧
+  const table = document.createElement('div');
+  ev.members.forEach((m, idx) => {
+    const div = document.createElement('div');
+    div.style.border='1px solid #ccc';
+    div.style.margin='8px';
+    div.style.padding='8px';
+    div.innerHTML = `<strong>${m.name}</strong> <button data-idx="${idx}" class="showSlots">表示</button>
+      <pre>${m.message || ''}</pre>`;
+    table.appendChild(div);
+  });
+  c.appendChild(table);
+
+  // 全員の重複している時間を簡易抽出（多数決ではなく「全員が○」の時間）
+  const allSlots = ev.members.map(m => m.slots || []);
+  const common = allSlots.length ? allSlots.reduce((a,b) => a.filter(x=>b.includes(x))) : [];
+  c.appendChild(document.createElement('hr'));
+  c.appendChild(document.createTextNode('全員が空いている時間：'));
+  const commonDiv = document.createElement('div');
+  common.forEach(slot => {
+    const btn = document.createElement('button');
+    btn.textContent = slot + ' を確定';
+    btn.addEventListener('click', () => confirmAndDecide(slot));
+    commonDiv.appendChild(btn);
+  });
+  c.appendChild(commonDiv);
+
+  // 決定中の表示
+  const cur = document.createElement('div');
+  cur.id='currentDecision';
+  cur.innerHTML = `<p>現状の決定： ${ev.finalDecision || '未決定'}</p>`;
+  c.appendChild(cur);
+}
+
+async function confirmAndDecide(slot) {
+  if (!confirm(`本当に「${slot}」を確定しますか？`)) return;
+  const ev = window._currentEv;
+  ev.finalDecision = slot;
+  // 保存
+  try {
+    await putFile(window._currentPath, JSON.stringify(ev, null, 2), `Decide ${window._currentEv.id} => ${slot}`);
+    alert('確定しました。JSON を更新しました。');
+    document.getElementById('currentDecision').innerText = `現状の決定： ${slot}`;
+  } catch (e) {
+    alert('保存エラー: ' + e.message);
+  }
+}
+</script>
+</body>
+</html>
